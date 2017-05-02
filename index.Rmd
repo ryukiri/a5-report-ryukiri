@@ -1,0 +1,101 @@
+---
+title: "index"
+author: "Austin Quach"
+date: "April 29, 2017"
+output: html_document
+---
+
+```{r, echo=FALSE, message=FALSE}
+library(jsonlite)
+library(httr)
+library(dplyr)
+library(knitr)
+base.url <- 'https://congress.api.sunlightfoundation.com/districts/locate?'
+zip.code <- 92620
+query.params <- list(zip = zip.code)
+response <- GET(base.url, query = query.params)
+body <- content(response, "text")
+results <- fromJSON(body)
+flattened <- flatten(results$results)
+flattened.district <- flattened$district
+```
+My zip code is `r zip.code` and my district is `r flattened.district`
+
+## Representatives Table
+
+```{r, echo=FALSE, message=FALSE}
+base.url.legislators <- 'https://congress.api.sunlightfoundation.com/legislators/locate?'
+query.params.legislators <- list(zip = 92620)
+response.legislators <- GET(base.url.legislators, query = query.params.legislators)
+body.legislators <- content(response.legislators, "text")
+results.legislators <- fromJSON(body.legislators)
+flattened.legislators <- flatten(results.legislators$results)
+flattened.legislators.filtered <- mutate(flattened.legislators, FirstName = first_name, LastName = last_name, Title = title, Party = party, Chamber = chamber, Phone = phone, Website = website, Twitter = twitter_id)
+flattened.legislators.filtered.select <- select(flattened.legislators.filtered, FirstName, LastName, Title, Party, Chamber, Phone, Website, Twitter)
+flattened.legislators.filtered.select$Website <- paste("[link](", flattened.legislators.filtered.select$Website, ")", sep="")
+flattened.legislators.filtered.select$Twitter <- paste("[link](", "https://twitter.com/", flattened.legislators.filtered.select$Twitter, ")", sep="")
+
+
+kable(flattened.legislators.filtered.select)
+```
+
+## Summmary Committee Info
+
+```{r, echo=FALSE, message=FALSE}
+findCommittee <- function(my.id) {
+  base.url.committee <- 'https://congress.api.sunlightfoundation.com/committees?'
+  query.params.committee <- list(member_ids = my.id)
+  response.committee <- GET(base.url.committee, query = query.params.committee)
+  body.committee <- fromJSON(content(response.committee, "text"))$results %>% flatten()
+  committees <- body.committee %>% select(name)
+  return (committees)
+}
+
+rep.ids <- flattened.legislators %>% select(bioguide_id)
+li <- lapply(rep.ids$bioguide_id, findCommittee)
+
+first.id <- nrow(findCommittee(rep.ids$bioguide_id[1]) %>% mutate(H001075 = name) %>% select(H001075))
+second.id <- nrow(findCommittee(rep.ids$bioguide_id[2]) %>% mutate(W000820 = name) %>% select(W000820))
+third.id <- nrow(findCommittee(rep.ids$bioguide_id[3]) %>% mutate(F000062 = name) %>% select(F000062))
+
+names <- paste(flattened.legislators.filtered.select$First, flattened.legislators.filtered.select$Last, sep=" ")
+
+count <- combine(second.id, first.id , third.id)
+barplot(count, main="Committees Served on by Each Rep.", horiz=TRUE, names.arg=names, xlab="# Committees")
+
+```
+
+## In-depth Committee
+```{r, echo=FALSE, message=FALSE}
+base.url.com <- 'https://congress.api.sunlightfoundation.com/committees?'
+query.params.com <- list(committee_id = 'SSBU', fields = "members")
+response.com <- GET(base.url.com, query = query.params.com)
+body.com <- fromJSON(content(response.com, "text"))$results$members[[1]] %>% flatten()
+
+chair <- body.com %>% filter(title == "Chairman")
+chair.name <- paste(chair$legislator.first_name, chair$legislator.last_name, sep=" ")
+
+num.people <- nrow(body.com)
+
+rep <- body.com %>% filter(legislator.bioguide_id == 'H001075')
+rep.side <- rep$side
+
+males <- body.com %>% filter(legislator.gender == "M")
+females <- body.com %>% filter(legislator.gender == "F")
+percent.male <-(nrow(males)/num.people)*100
+```
+
+#### Who is the chair of the committee? (first and last name)
+The chair of the committee is `r chair.name`.
+
+#### How many people are in your committee?
+There are `r num.people` people in the committee.
+
+#### Is your representative on the majority or minority side of the committee?
+My representative is on the `r rep.side` of the committee.
+
+#### Write a few sentences about what the committee does (this requires outside research)
+The Senate Committee on the Budget is one of the Senate's newer committees, created by the Congressional Budget and Impoundment Control Act of 1974. This committee is responsible for drafting budget plans for Congress and for monitoring and enforcing rules surrounding spending, revenue, and the federal budget. It's primary responsibility is to develop a concurrent resolution on the budget to serve as the framework for congressional action on spending, revenue, and debt-limit legislation.
+
+#### What is the gender distribution on the committee (%M, %F)
+`r (nrow(males)/num.people)*100`% Males. `r (nrow(females)/num.people)*100`% Females.
